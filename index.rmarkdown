@@ -1,0 +1,523 @@
+---
+title: "Selection Bias & Missing Data Challenge - Part 1"
+subtitle: "Blue Noise Stippling: Creating Art from Data"
+format:
+  html: default
+  pdf: default
+execute:
+  echo: false
+  eval: true
+---
+
+```{r setup, include=FALSE}
+# Setup chunk: Suppress the xfun::attr() deprecation warning
+# This warning is harmless but can be annoying during rendering
+# Individual code chunks can override these settings if needed
+knitr::opts_chunk$set(
+  warning = FALSE,  # Suppress warnings (including xfun deprecation)
+  message = FALSE   # Suppress package loading messages
+)
+# Note: Chunks with explicit warning/message settings will override these defaults
+```
+
+
+## The Problem: Can Algorithms Create Art?
+
+**Core Question:** How can we convert a photograph into an aesthetically pleasing pattern of dots that preserves the visual information of the original image?
+
+**The Challenge:** Blue noise stippling is a technique that converts images into patterns of dots (stipples) using algorithms that balance visual accuracy with spatial distribution. This challenge asks you to implement a modified "void and cluster" algorithm that combines importance sampling with blue noise distribution properties to create stippling patterns that are both visually accurate and spatially well-distributed.
+
+**Our Approach:** We'll use a modified void-and-cluster algorithm that:
+1. Creates an importance map identifying visually important regions
+2. Uses a toroidal (periodic) Gaussian kernel for repulsion to ensure blue noise properties
+3. Iteratively selects points with minimum energy
+4. Balances image content importance with blue noise spatial distribution
+
+
+
+## Introduction to Blue Noise Stippling
+
+Blue noise stippling is a technique for converting images into a pattern of dots (stipples) that preserves the visual information of the original image while creating an aesthetically pleasing, evenly distributed pattern. This method follows the approach described by [Bart Wronski](https://bartwronski.com/2022/08/31/progressive-image-stippling-and-greedy-blue-noise-importance-sampling/).
+
+The method uses a modified "void and cluster" algorithm that combines importance sampling with blue noise distribution properties to create stippling patterns that are both visually accurate and spatially well-distributed. This version uses **smooth extreme downweighting** that selectively downweights very dark and very light tones while preserving mid-tones, creating a more balanced distribution of stipples across the image.
+
+## Loading the Original Image
+
+First, let's load an image that we'll convert to a blue noise stippling pattern. You can use any image you'd like, but we'll demonstrate with the provided example.
+
+```{r}
+#| label: load-image-r
+#| echo: false
+#| fig-cap: "Original image before stippling"
+
+library(magick)
+library(ggplot2)
+
+# Load the image
+img_path <- 'cheeseburger2.png'
+original_img <- image_read(img_path)
+
+# Convert to grayscale
+original_img <- image_convert(original_img, colorspace = "Gray")
+
+# Get image dimensions
+img_info <- image_info(original_img)
+img_width <- img_info$width
+img_height <- img_info$height
+
+# Display the original image using image() function for correct orientation
+# Convert to matrix for display
+img_array <- as.numeric(image_data(original_img, "gray")[1,,])
+dim(img_array) <- c(img_width, img_height)
+img_matrix_display <- t(img_array) / 255.0  # [height, width]
+# Flip matrix vertically to match correct orientation (images start from top, R matrices from bottom)
+img_matrix_display <- img_matrix_display[nrow(img_matrix_display):1, ]
+par(mar = c(1, 1, 2, 1))
+image(1:img_width, 1:img_height, t(img_matrix_display), 
+      col = gray(seq(0, 1, length.out = 256)),
+      xlab = "", ylab = "", axes = FALSE, main = "Original Image", 
+      asp = img_height/img_width, ylim = c(img_height, 1))
+
+cat("Image dimensions:", img_height, "x", img_width, "pixels\n")
+```
+
+## Importance Mapping
+
+Before applying the stippling algorithm, we create an **importance map** that identifies which regions of the image should receive more stipples. The importance map is computed by:
+
+- **Brightness inversion**: The image brightness is inverted so that dark areas receive higher importance and thus more dots, while light areas receive fewer dots
+- **Extreme tone downweighting**: Smooth Gaussian functions downweight tones below 0.2 (very dark) and above 0.8 (very light), creating a gradual transition that preserves mid-tones
+- **Mid-tone boost**: A smooth Gaussian function centered on mid-tones provides a gradual increase in importance for mid-tone regions, ensuring they receive appropriate stippling density
+- **Selective and effective**: This approach ensures that stipples are distributed appropriately (more dots in dark areas and mid-tones, fewer in extreme dark/light areas) while maintaining good spatial distribution
+
+```{r}
+#| label: importance-map-r
+#| echo: false
+#| message: false
+#| warning: false
+
+compute_importance <- function(gray_img, 
+                                extreme_downweight = 0.5,
+                                extreme_threshold_low = 0.4,
+                                extreme_threshold_high = 0.8,
+                                extreme_sigma = 0.1,
+                                mid_tone_boost = 0.4,
+                                mid_tone_sigma = 0.2) {
+  # Clip image to [0, 1]
+  I <- pmax(pmin(gray_img, 1.0), 0.0)
+  
+  # Invert brightness
+  I_inverted <- 1.0 - I
+  
+  # Dark mask
+  dark_mask <- exp(-((I - 0.0)^2) / (2.0 * (extreme_sigma^2)))
+  dark_mask[I >= extreme_threshold_low] <- 0.0
+  if(max(dark_mask) > 0) {
+    dark_mask <- dark_mask / max(dark_mask)
+  }
+  
+  # Light mask
+  light_mask <- exp(-((I - 1.0)^2) / (2.0 * (extreme_sigma^2)))
+  light_mask[I <= extreme_threshold_high] <- 0.0
+  if(max(light_mask) > 0) {
+    light_mask <- light_mask / max(light_mask)
+  }
+  
+  # Combine masks
+  extreme_mask <- pmax(dark_mask, light_mask)
+  
+  # Apply downweighting
+  importance <- I_inverted * (1.0 - extreme_downweight * extreme_mask)
+  
+  # Mid-tone boost
+  mid_tone_center <- 0.65
+  mid_tone_gaussian <- exp(-((I - mid_tone_center)^2) / (2.0 * (mid_tone_sigma^2)))
+  if(max(mid_tone_gaussian) > 0) {
+    mid_tone_gaussian <- mid_tone_gaussian / max(mid_tone_gaussian)
+  }
+  
+  importance <- importance * (1.0 + mid_tone_boost * mid_tone_gaussian)
+  
+  # Normalize
+  m <- min(importance)
+  M <- max(importance)
+  if(M > m) {
+    importance <- (importance - m) / (M - m)
+  }
+  
+  return(importance)
+}
+```
+
+## Blue Noise Stippling Algorithm
+
+The stippling algorithm uses a modified void-and-cluster approach that:
+
+1. Creates an importance map that identifies visually important regions
+2. Initializes an energy field based on the importance map (higher importance → lower energy)
+3. Uses a toroidal (periodic) Gaussian kernel for repulsion to ensure blue noise properties
+4. Iteratively selects points with minimum energy
+5. Adds Gaussian "splats" around selected points to prevent clustering
+6. Balances image content importance with blue noise spatial distribution
+
+```{r}
+#| label: stippling-functions-r
+#| echo: false
+#| message: false
+#| warning: false
+
+# Note: R implementation uses true 2D circular shift (roll2d) to match Python's np.roll behavior
+
+toroidal_gaussian_kernel <- function(h, w, sigma) {
+  y <- 0:(h-1)
+  x <- 0:(w-1)
+  
+  # Compute toroidal distances
+  dy <- pmin(y, h - y)
+  dx <- pmin(x, w - x)
+  
+  # Create distance matrices
+  # each row gets same dy, each col gets same dx
+  dy_mat <- matrix(rep(dy, each = w), nrow = h, ncol = w)
+  dx_mat <- matrix(rep(dx, times = h), nrow = h, ncol = w)
+  
+  # Compute Gaussian
+  kern <- exp(-(dx_mat^2 + dy_mat^2) / (2.0 * sigma^2))
+  kern <- kern / sum(kern)  # Normalize
+  
+  return(kern)
+}
+
+# Helper function for true 2D circular shift (equivalent to np.roll)
+# np.roll equivalent: positive shift moves down/right
+roll2d <- function(mat, shift_y = 0, shift_x = 0) {
+  h <- nrow(mat)
+  w <- ncol(mat)
+  sy <- ((shift_y %% h) + h) %% h
+  sx <- ((shift_x %% w) + w) %% w
+  rows <- if (sy == 0) 1:h else c((h - sy + 1):h, 1:(h - sy))
+  cols <- if (sx == 0) 1:w else c((w - sx + 1):w, 1:(w - sx))
+  mat[rows, cols, drop = FALSE]
+}
+
+void_and_cluster <- function(input_img, 
+                             percentage = 0.08,
+                             sigma = 0.9,
+                             content_bias = 0.9,
+                             importance_img = NULL,
+                             noise_scale_factor = 0.1) {
+  # Clip image to [0, 1]
+  I <- pmax(pmin(input_img, 1.0), 0.0)
+  h <- nrow(I)
+  w <- ncol(I)
+  
+  # Compute or use provided importance map
+  if(is.null(importance_img)) {
+    importance <- compute_importance(I)
+  } else {
+    importance <- pmax(pmin(importance_img, 1.0), 0.0)
+  }
+  
+  # Create toroidal Gaussian kernel for repulsion
+  kernel <- toroidal_gaussian_kernel(h, w, sigma)
+  
+  # Initialize energy field: lower energy → more likely to be picked
+  energy_current <- -importance * content_bias
+  
+  # Stipple buffer: start with white background; selected points become black dots
+  final_stipple <- matrix(1.0, nrow = h, ncol = w)
+  samples <- vector("list", as.integer(h * w * percentage))
+  
+  # Helper function to roll kernel to an arbitrary position
+  # This implements the exact equivalent of Python's np.roll(kernel, shift=y, axis=0) 
+  # followed by np.roll(kernel, shift=x, axis=1)
+  # Uses true 2D circular shift to preserve directionality and avoid quadrant-mirroring
+  energy_splat <- function(y, x) {
+    # exact np.roll(kernel, y; x)
+    roll2d(kernel, shift_y = y - 1, shift_x = x - 1)
+  }
+  
+  # Number of points to select
+  num_points <- as.integer(h * w * percentage)
+  
+  # Set seed for reproducibility
+  set.seed(42)
+  
+  # --- first point: pick min in a center window ---
+  cy <- as.integer(h / 2)
+  cx <- as.integer(w / 2)
+  r <- min(20L, as.integer(h / 10), as.integer(w / 10))
+  y_start <- max(1L, cy - r)
+  y_end <- min(h, cy + r)
+  x_start <- max(1L, cx - r)
+  x_end <- min(w, cx + r)
+  
+  region <- energy_current[y_start:y_end, x_start:x_end]
+  flat_idx <- which.min(region)
+  
+  # IMPORTANT: R is column-major -> (y,x) from flat:
+  # y = ((idx-1) %% nrow) + 1 ; x = ((idx-1) %/% nrow) + 1
+  ry <- ((flat_idx - 1) %% nrow(region)) + 1
+  rx <- ((flat_idx - 1) %/% nrow(region)) + 1
+  y0 <- y_start + ry - 1
+  x0 <- x_start + rx - 1
+  
+  # Place first point
+  energy_current <- energy_current + energy_splat(y0, x0)
+  energy_current[y0, x0] <- Inf  # Prevent reselection
+  samples[[1]] <- c(y0, x0, I[y0, x0])
+  final_stipple[y0, x0] <- 0.0  # Black dot
+  
+  # --- iterate ---
+  for(i in 2:num_points) {
+    # Add exploration noise that decreases over time
+    exploration <- 1.0 - ((i - 1) / num_points) * 0.5  # Decrease from 1.0 to 0.5
+    noise <- matrix(rnorm(h * w, 0, noise_scale_factor * content_bias * exploration), 
+                    nrow = h, ncol = w)
+    energy_with_noise <- energy_current + noise
+    
+    # Find position with minimum energy (with noise for exploration)
+    pos_flat <- which.min(energy_with_noise)
+    
+    # Column-major unflatten:
+    # R matrices are column-major, so y = (idx-1) %% h + 1, x = (idx-1) %/% h + 1
+    y <- ((pos_flat - 1) %% h) + 1
+    x <- ((pos_flat - 1) %/% h) + 1
+    
+    # Add Gaussian splat to prevent nearby points from being selected
+    energy_current <- energy_current + energy_splat(y, x)
+    energy_current[y, x] <- Inf  # Prevent reselection
+    
+    # Record the sample
+    samples[[i]] <- c(y, x, I[y, x])
+    final_stipple[y, x] <- 0.0  # Black dot
+  }
+  
+  # Convert samples list to matrix
+  samples_matrix <- do.call(rbind, samples[1:num_points])
+  
+  return(list(stipple = final_stipple, samples = samples_matrix))
+}
+```
+
+## Preparing the Working Image
+
+Before generating the stippling pattern, we prepare the image by resizing if necessary and computing the importance map.
+
+```{r}
+#| label: prep-image-r
+#| echo: false
+#| message: false
+#| warning: false
+
+# Resize image if needed - increased for better quality
+max_size <- 800
+img_info_orig <- image_info(original_img)
+img_h <- img_info_orig$height
+img_w <- img_info_orig$width
+
+if(img_h > max_size || img_w > max_size) {
+  scale <- max_size / max(img_h, img_w)
+  new_h <- round(img_h * scale)
+  new_w <- round(img_w * scale)
+  img_resized <- image_resize(original_img, paste0(new_w, "x", new_h, "!"))
+  cat("Resized image to", new_h, "x", new_w, "for processing\n")
+} else {
+  img_resized <- original_img
+}
+
+# Get dimensions of resized image
+img_info <- image_info(img_resized)
+h <- img_info$height
+w <- img_info$width
+
+# Convert magick image to matrix
+# Extract pixel data - image_data returns a 4D array: [1, width, height, channels]
+img_array_raw <- image_data(img_resized, "gray")
+# Convert to numeric matrix - magick stores as [1, width, height, 1] for grayscale
+# Extract as [width, height] then transpose to [height, width] for R matrix convention
+img_matrix <- as.numeric(img_array_raw[1,,])
+dim(img_matrix) <- c(w, h)  # [width, height]
+img_matrix <- t(img_matrix)  # transpose to [height, width]
+# Normalize to [0, 1]
+img_matrix <- img_matrix / 255.0
+# Note: Image is in natural orientation (top row = row 1, bottom row = row h)
+
+cat("Final image shape:", nrow(img_matrix), "x", ncol(img_matrix), "\n")
+
+# Compute importance map
+importance_map <- compute_importance(img_matrix)
+cat("Importance map computed\n")
+```
+
+## Generating the Stippled Image
+
+Now let's apply the stippling algorithm to create the blue noise stippling pattern.
+
+```{r}
+#| label: generate-stipple-r
+#| echo: false
+#| message: false
+#| warning: false
+
+# Generate stippling pattern
+cat("Generating blue noise stippling pattern...\n")
+stipple_result <- void_and_cluster(
+  img_matrix,
+  percentage = 0.08,
+  sigma = 0.9,
+  content_bias = 0.9,
+  importance_img = importance_map,
+  noise_scale_factor = 0.1
+)
+
+stipple_pattern <- stipple_result$stipple
+samples <- stipple_result$samples
+
+cat("Generated", nrow(samples), "stipple points\n")
+cat("Stipple pattern shape:", nrow(stipple_pattern), "x", ncol(stipple_pattern), "\n")
+
+# Save stippled image for use in Part 2 (statsMemeChallenge)
+# Save in both current directory and statsMemeChallenge directory
+saveRDS(stipple_pattern, 'stippleImage.rds')
+if(dir.exists('../statsMemeChallenge')) {
+  saveRDS(stipple_pattern, '../statsMemeChallenge/stippleImage.rds')
+  cat("Saved stippled image to '../statsMemeChallenge/stippleImage.rds' for use in Part 2\n")
+} else {
+  cat("Saved stippled image to 'stippleImage.rds' (statsMemeChallenge directory not found)\n")
+  cat("You can manually copy this file to the statsMemeChallenge directory\n")
+}
+```
+
+## Displaying the Results
+
+Let's visualize the original image, the importance map, and the stippled version side by side for comparison.
+
+```{r}
+#| label: display-results-r
+#| echo: false
+#| fig-cap: "Comparison of original image, importance map, and blue noise stippling"
+#| fig-width: 12
+#| fig-height: 5
+#| dpi: 300
+
+par(mfrow = c(1, 3), mar = c(1, 1, 2, 1))
+
+# Original - display using image() function for consistent orientation
+h <- nrow(img_matrix)
+w <- ncol(img_matrix)
+# Create display matrix (already in correct orientation after our extraction)
+image(1:w, 1:h, t(img_matrix), 
+      col = gray(seq(0, 1, length.out = 256)),
+      xlab = "", ylab = "", axes = FALSE, main = "Original Image", 
+      asp = h/w, ylim = c(h, 1))
+
+# Importance map - display as grayscale image (flip y-axis for correct orientation)
+image(1:w, 1:h, t(importance_map), col = gray(seq(0, 1, length.out = 256)),
+      xlab = "", ylab = "", axes = FALSE, main = "Importance Map", asp = h/w,
+      ylim = c(h, 1))
+
+# Stipple pattern - display as grayscale image (flip y-axis for correct orientation)
+image(1:w, 1:h, t(stipple_pattern), col = gray(seq(0, 1, length.out = 256)),
+      xlab = "", ylab = "", axes = FALSE, main = "Blue Noise Stippling", asp = h/w,
+      ylim = c(h, 1))
+```
+
+## Progressive Stippling Animation
+
+This section creates a GIF showing how the stippled image looks as more points are added sequentially. We'll use the already-computed stippling points to generate frames at increments of 100 points.
+
+```{r}
+#| label: progressive-stippling-r
+#| echo: false
+#| message: false
+#| warning: false
+
+# Use the existing samples from the already-computed stippling
+cat("Using existing stippling with", nrow(samples), "points\n")
+cat("Image shape:", nrow(img_matrix), "x", ncol(img_matrix), "\n")
+
+# Create progressive frames by adding points sequentially
+frame_increment <- 100
+frames <- list()
+point_counts <- c()
+
+# Start with white background
+progressive_stipple <- matrix(1.0, nrow = nrow(img_matrix), ncol = ncol(img_matrix))
+
+# Add first point and save initial frame
+if(nrow(samples) > 0) {
+  y0 <- as.integer(samples[1, 1])
+  x0 <- as.integer(samples[1, 2])
+  progressive_stipple[y0, x0] <- 0.0
+  frames[[1]] <- progressive_stipple
+  point_counts <- c(point_counts, 1)
+}
+
+# Add remaining points sequentially and save frames at increments
+for(i in 2:nrow(samples)) {
+  y <- as.integer(samples[i, 1])
+  x <- as.integer(samples[i, 2])
+  progressive_stipple[y, x] <- 0.0  # Add black dot
+  
+  # Save frame at increments (100, 200, 300, ...) and at the end
+  if(i %% frame_increment == 0 || i == nrow(samples)) {
+    frames[[length(frames) + 1]] <- progressive_stipple
+    point_counts <- c(point_counts, i)
+  }
+}
+
+cat("Generated", length(frames), "frames\n")
+cat("Point counts:", paste(point_counts, collapse = ", "), "\n")
+```
+
+Now let's create the GIF animation:
+
+```{r}
+#| label: create-gif-r
+#| include: false
+#| message: false
+#| warning: false
+
+# Create GIF animation using magick package
+library(magick)
+
+cat("Creating GIF animation...\n")
+
+# Create list of image frames
+img_list <- lapply(1:length(frames), function(i) {
+  frame <- frames[[i]]                 # matrix [h, w] with values in [0,1]
+  # Ensure values are in [0,1] range
+  frame_normalized <- pmax(pmin(frame, 1.0), 0.0)
+  
+  # Create a temporary PNG file with text annotation
+  temp_file <- tempfile(fileext = ".png")
+  png(temp_file, width = ncol(frame), height = nrow(frame), bg = "white", res = 150)
+  par(mar = c(0, 0, 0, 0), xaxs = "i", yaxs = "i")
+  image(1:ncol(frame), 1:nrow(frame), t(frame_normalized), 
+        col = gray(seq(0, 1, length.out = 256)),
+        xlab = "", ylab = "", axes = FALSE, useRaster = TRUE)
+  # Add text annotation directly in the plot
+  text(ncol(frame)/2, nrow(frame) * 0.95, 
+       paste("Progressive Stippling:", point_counts[i], "points"),
+       col = "black", cex = 1.2, font = 2)
+  dev.off()
+  
+  # Read the image
+  img_magick <- image_read(temp_file)
+  unlink(temp_file)  # Clean up temp file
+  
+  return(img_magick)
+})
+
+# Combine frames into animated GIF
+gif <- image_animate(image_join(img_list), fps = 2)
+gif_path <- "progressive_stippling.gif"
+image_write(gif, gif_path)
+
+cat("GIF saved to:", gif_path, "\n")
+cat("Total frames:", length(frames), "\n")
+cat("Point counts:", paste(point_counts, collapse = ", "), "\n")
+```
+
+![Progressive stippling animation showing the sequential build-up of points. Each frame represents an increment of 100 points, demonstrating how the blue noise stippling pattern develops as more points are added.](progressive_stippling.gif)

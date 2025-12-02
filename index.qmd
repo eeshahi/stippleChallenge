@@ -65,12 +65,12 @@ img_info <- image_info(original_img)
 img_width <- img_info$width
 img_height <- img_info$height
 
-# Display the original image using image() function for consistent orientation
+# Display the original image using image() function for correct orientation
 # Convert to matrix for display
 img_array <- as.numeric(image_data(original_img, "gray")[1,,])
 dim(img_array) <- c(img_width, img_height)
 img_matrix_display <- t(img_array) / 255.0  # [height, width]
-# Flip vertically to match R's coordinate system
+# Flip matrix vertically to match correct orientation (images start from top, R matrices from bottom)
 img_matrix_display <- img_matrix_display[nrow(img_matrix_display):1, ]
 par(mar = c(1, 1, 2, 1))
 image(1:img_width, 1:img_height, t(img_matrix_display), 
