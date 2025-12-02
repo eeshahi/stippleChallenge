@@ -76,10 +76,17 @@ img_info <- image_info(original_img)
 img_width <- img_info$width
 img_height <- img_info$height
 
-# Display the original image
-img_raster <- as.raster(original_img)
-plot(c(0, img_width), c(0, img_height), type = "n", xlab = "", ylab = "", axes = FALSE, main = "Original Image")
-rasterImage(img_raster, 0, 0, img_width, img_height)
+# Display the original image using image() function for consistent orientation
+# Convert to matrix for display
+img_array <- as.numeric(image_data(original_img, "gray")[1,,])
+dim(img_array) <- c(img_width, img_height)
+img_matrix_display <- t(img_array) / 255.0  # [height, width]
+# Flip vertically to match R's coordinate system
+img_matrix_display <- img_matrix_display[nrow(img_matrix_display):1, ]
+image(1:img_width, 1:img_height, t(img_matrix_display), 
+      col = gray(seq(0, 1, length.out = 256)),
+      xlab = "", ylab = "", axes = FALSE, main = "Original Image", 
+      asp = img_height/img_width, ylim = c(img_height, 1))
 
 cat("Image dimensions:", img_height, "x", img_width, "pixels\n")
 ```
@@ -367,12 +374,14 @@ w <- img_info$width
 # Convert magick image to matrix
 # Extract pixel data - image_data returns a 4D array: [1, width, height, channels]
 img_array_raw <- image_data(img_resized, "gray")
-# Convert to numeric matrix - transpose because magick uses [width, height] but we want [height, width]
+# Convert to numeric matrix - magick stores as [1, width, height, 1] for grayscale
+# Extract as [width, height] then transpose to [height, width] for R matrix convention
 img_matrix <- as.numeric(img_array_raw[1,,])
 dim(img_matrix) <- c(w, h)  # [width, height]
 img_matrix <- t(img_matrix)  # transpose to [height, width]
 # Normalize to [0, 1]
 img_matrix <- img_matrix / 255.0
+# Note: Image is in natural orientation (top row = row 1, bottom row = row h)
 
 cat("Final image shape:", nrow(img_matrix), "x", ncol(img_matrix), "\n")
 
@@ -435,20 +444,24 @@ Let's visualize the original image, the importance map, and the stippled version
 
 par(mfrow = c(1, 3), mar = c(2, 2, 2, 2))
 
-# Original - display using rasterImage
-img_raster <- as.raster(img_resized)
+# Original - display using image() function for consistent orientation
 h <- nrow(img_matrix)
 w <- ncol(img_matrix)
-plot(c(0, w), c(0, h), type = "n", xlab = "", ylab = "", axes = FALSE, main = "Original Image")
-rasterImage(img_raster, 0, 0, w, h)
+# Create display matrix (already in correct orientation after our extraction)
+image(1:w, 1:h, t(img_matrix), 
+      col = gray(seq(0, 1, length.out = 256)),
+      xlab = "", ylab = "", axes = FALSE, main = "Original Image", 
+      asp = h/w, ylim = c(h, 1))
 
-# Importance map - display as grayscale image
+# Importance map - display as grayscale image (flip y-axis for correct orientation)
 image(1:w, 1:h, t(importance_map), col = gray(seq(0, 1, length.out = 256)),
-      xlab = "", ylab = "", axes = FALSE, main = "Importance Map", asp = 1)
+      xlab = "", ylab = "", axes = FALSE, main = "Importance Map", asp = h/w,
+      ylim = c(h, 1))
 
-# Stipple pattern - display as grayscale image
+# Stipple pattern - display as grayscale image (flip y-axis for correct orientation)
 image(1:w, 1:h, t(stipple_pattern), col = gray(seq(0, 1, length.out = 256)),
-      xlab = "", ylab = "", axes = FALSE, main = "Blue Noise Stippling", asp = 1)
+      xlab = "", ylab = "", axes = FALSE, main = "Blue Noise Stippling", asp = h/w,
+      ylim = c(h, 1))
 ```
 
 :::
@@ -613,14 +626,15 @@ for(i in 1:grid_rows) {
 par(mfrow = c(1, 2), mar = c(2, 2, 2, 2))
 
 # Show original image with grid overlay
-img_raster <- as.raster(img_resized)
-plot(c(0, w), c(0, h), type = "n", xlab = "", ylab = "", axes = FALSE, main = "Original Image with Grid")
-rasterImage(img_raster, 0, 0, w, h)
+image(1:w, 1:h, t(img_matrix), 
+      col = gray(seq(0, 1, length.out = 256)),
+      xlab = "", ylab = "", axes = FALSE, main = "Original Image with Grid",
+      asp = h/w, ylim = c(h, 1))
 
 # Draw grid lines
 for(i in 0:grid_rows) {
   y <- i * section_h
-  abline(h = h - y, col = 'red', lwd = 0.5, lty = 2)  # Flip Y axis for rasterImage coordinates
+  abline(h = y, col = 'red', lwd = 0.5, lty = 2)
 }
 for(j in 0:grid_cols) {
   x <- j * section_w
@@ -707,13 +721,15 @@ for(i in 1:grid_rows) {
 par(mfrow = c(1, 2), mar = c(2, 2, 2, 2))
 
 # Original image
-img_raster <- as.raster(img_resized)
-plot(c(0, w), c(0, h), type = "n", xlab = "", ylab = "", axes = FALSE, main = "Original Image")
-rasterImage(img_raster, 0, 0, w, h)
+image(1:w, 1:h, t(img_matrix), 
+      col = gray(seq(0, 1, length.out = 256)),
+      xlab = "", ylab = "", axes = FALSE, main = "Original Image",
+      asp = h/w, ylim = c(h, 1))
 
 # Stipple pattern - display as grayscale image
 image(1:w, 1:h, t(stipple_pattern), col = gray(seq(0, 1, length.out = 256)),
-      xlab = "", ylab = "", axes = FALSE, main = "Stippled Image", asp = 1)
+      xlab = "", ylab = "", axes = FALSE, main = "Stippled Image", 
+      asp = h/w, ylim = c(h, 1))
 ```
 
 :::
