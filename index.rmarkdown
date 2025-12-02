@@ -741,3 +741,4 @@ image(1:w, 1:h, t(stipple_pattern), col = gray(seq(0, 1, length.out = 256)),
 
 :::
 
+
