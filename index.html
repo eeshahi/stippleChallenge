@@ -1,10 +1,12 @@
 <!DOCTYPE html>
-<html xmlns="http://www.w3.org/1999/xhtml" lang="en" xml:lang="en"><head>
+<html xmlns="http://www.w3.org/1999/xhtml" lang="en" xml:lang="en">
 
-<meta charset="utf-8">
-<meta name="generator" content="quarto-1.8.22">
+<head>
 
-<meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=yes">
+<meta charset="utf-8" />
+<meta name="generator" content="quarto-1.8.22" />
+
+<meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=yes" />
 
 
 <title>Selection Bias &amp; Missing Data Challenge - Part 1</title>
@@ -22,27 +24,16 @@ ul.task-list li input[type="checkbox"] {
 }
 </style>
 
-
-<script src="index_files/libs/clipboard/clipboard.min.js"></script>
-<script src="index_files/libs/quarto-html/quarto.js" type="module"></script>
-<script src="index_files/libs/quarto-html/tabsets/tabsets.js" type="module"></script>
-<script src="index_files/libs/quarto-html/axe/axe-check.js" type="module"></script>
-<script src="index_files/libs/quarto-html/popper.min.js"></script>
-<script src="index_files/libs/quarto-html/tippy.umd.min.js"></script>
-<script src="index_files/libs/quarto-html/anchor.min.js"></script>
-<link href="index_files/libs/quarto-html/tippy.css" rel="stylesheet">
-<link href="index_files/libs/quarto-html/quarto-syntax-highlighting-cd7454b418030687c631a6a7286fbe16.css" rel="stylesheet" id="quarto-text-highlighting-styles">
-<script src="index_files/libs/bootstrap/bootstrap.min.js"></script>
-<link href="index_files/libs/bootstrap/bootstrap-icons.css" rel="stylesheet">
-<link href="index_files/libs/bootstrap/bootstrap-d6a003b94517c951b2d65075d42fb01b.min.css" rel="stylesheet" append-hash="true" id="quarto-bootstrap" data-mode="light">
+<!-- htmldependencies:E3FAD763 -->
 
 
 </head>
 
-<body class="fullcontent quarto-light">
+<body>
 
 <div id="quarto-content" class="page-columns page-rows-contents page-layout-article">
-
+<div id="quarto-margin-sidebar" class="sidebar margin-sidebar">
+</div>
 <main class="content" id="quarto-document-content">
 
 <header id="title-block-header" class="quarto-title-block default">
@@ -66,24 +57,24 @@ ul.task-list li input[type="checkbox"] {
 
 
 <section id="the-problem-can-algorithms-create-art" class="level2">
-<h2 class="anchored" data-anchor-id="the-problem-can-algorithms-create-art">The Problem: Can Algorithms Create Art?</h2>
+<h2>The Problem: Can Algorithms Create Art?</h2>
 <p><strong>Core Question:</strong> How can we convert a photograph into an aesthetically pleasing pattern of dots that preserves the visual information of the original image?</p>
 <p><strong>The Challenge:</strong> Blue noise stippling is a technique that converts images into patterns of dots (stipples) using algorithms that balance visual accuracy with spatial distribution. This challenge asks you to implement a modified “void and cluster” algorithm that combines importance sampling with blue noise distribution properties to create stippling patterns that are both visually accurate and spatially well-distributed.</p>
 <p><strong>Our Approach:</strong> We’ll use a modified void-and-cluster algorithm that: 1. Creates an importance map identifying visually important regions 2. Uses a toroidal (periodic) Gaussian kernel for repulsion to ensure blue noise properties 3. Iteratively selects points with minimum energy 4. Balances image content importance with blue noise spatial distribution</p>
 </section>
 <section id="introduction-to-blue-noise-stippling" class="level2">
-<h2 class="anchored" data-anchor-id="introduction-to-blue-noise-stippling">Introduction to Blue Noise Stippling</h2>
+<h2>Introduction to Blue Noise Stippling</h2>
 <p>Blue noise stippling is a technique for converting images into a pattern of dots (stipples) that preserves the visual information of the original image while creating an aesthetically pleasing, evenly distributed pattern. This method follows the approach described by <a href="https://bartwronski.com/2022/08/31/progressive-image-stippling-and-greedy-blue-noise-importance-sampling/">Bart Wronski</a>.</p>
 <p>The method uses a modified “void and cluster” algorithm that combines importance sampling with blue noise distribution properties to create stippling patterns that are both visually accurate and spatially well-distributed. This version uses <strong>smooth extreme downweighting</strong> that selectively downweights very dark and very light tones while preserving mid-tones, creating a more balanced distribution of stipples across the image.</p>
 </section>
 <section id="loading-the-original-image" class="level2">
-<h2 class="anchored" data-anchor-id="loading-the-original-image">Loading the Original Image</h2>
+<h2>Loading the Original Image</h2>
 <p>First, let’s load an image that we’ll convert to a blue noise stippling pattern. You can use any image you’d like, but we’ll demonstrate with the provided example.</p>
 <div class="cell">
 <div class="cell-output-display">
 <div class="quarto-figure quarto-figure-center">
-<figure class="figure">
-<p><img src="index_files/figure-html/load-image-r-1.png" class="img-fluid figure-img" width="2400"></p>
+<figure>
+<p><img src="index_files/figure-html/load-image-r-1.png" class="img-fluid" width="672" /></p>
 <figcaption>Original image before stippling</figcaption>
 </figure>
 </div>
@@ -94,7 +85,7 @@ ul.task-list li input[type="checkbox"] {
 </div>
 </section>
 <section id="importance-mapping" class="level2">
-<h2 class="anchored" data-anchor-id="importance-mapping">Importance Mapping</h2>
+<h2>Importance Mapping</h2>
 <p>Before applying the stippling algorithm, we create an <strong>importance map</strong> that identifies which regions of the image should receive more stipples. The importance map is computed by:</p>
 <ul>
 <li><strong>Brightness inversion</strong>: The image brightness is inverted so that dark areas receive higher importance and thus more dots, while light areas receive fewer dots</li>
@@ -102,15 +93,96 @@ ul.task-list li input[type="checkbox"] {
 <li><strong>Mid-tone boost</strong>: A smooth Gaussian function centered on mid-tones provides a gradual increase in importance for mid-tone regions, ensuring they receive appropriate stippling density</li>
 <li><strong>Selective and effective</strong>: This approach ensures that stipples are distributed appropriately (more dots in dark areas and mid-tones, fewer in extreme dark/light areas) while maintaining good spatial distribution</li>
 </ul>
-<p>#| label: importance-map-r #| echo: false #| message: false #| warning: false</p>
-<p>compute_importance &lt;- function(gray_img, extreme_downweight = 0.5, extreme_threshold_low = 0.4, extreme_threshold_high = 0.8, extreme_sigma = 0.1, mid_tone_boost = 0.4, mid_tone_sigma = 0.2) { # Clip image to [0, 1] I &lt;- pmax(pmin(gray_img, 1.0), 0.0)</p>
-<p># Invert brightness I_inverted &lt;- 1.0 - I</p>
-<p># Dark mask … (380 lines left)</p>
+</section>
+<section id="blue-noise-stippling-algorithm" class="level2">
+<h2>Blue Noise Stippling Algorithm</h2>
+<p>The stippling algorithm uses a modified void-and-cluster approach that:</p>
+<ol type="1">
+<li>Creates an importance map that identifies visually important regions</li>
+<li>Initializes an energy field based on the importance map (higher importance → lower energy)</li>
+<li>Uses a toroidal (periodic) Gaussian kernel for repulsion to ensure blue noise properties</li>
+<li>Iteratively selects points with minimum energy</li>
+<li>Adds Gaussian “splats” around selected points to prevent clustering</li>
+<li>Balances image content importance with blue noise spatial distribution</li>
+</ol>
+</section>
+<section id="preparing-the-working-image" class="level2">
+<h2>Preparing the Working Image</h2>
+<p>Before generating the stippling pattern, we prepare the image by resizing if necessary and computing the importance map.</p>
+<div class="cell">
+<div class="cell-output cell-output-stdout">
+<pre><code>Resized image to 800 x 667 for processing</code></pre>
+</div>
+<div class="cell-output cell-output-stdout">
+<pre><code>Final image shape: 800 x 667 </code></pre>
+</div>
+<div class="cell-output cell-output-stdout">
+<pre><code>Importance map computed</code></pre>
+</div>
+</div>
+</section>
+<section id="generating-the-stippled-image" class="level2">
+<h2>Generating the Stippled Image</h2>
+<p>Now let’s apply the stippling algorithm to create the blue noise stippling pattern.</p>
+<div class="cell">
+<div class="cell-output cell-output-stdout">
+<pre><code>Generating blue noise stippling pattern...</code></pre>
+</div>
+<div class="cell-output cell-output-stdout">
+<pre><code>Generated 42688 stipple points</code></pre>
+</div>
+<div class="cell-output cell-output-stdout">
+<pre><code>Stipple pattern shape: 800 x 667 </code></pre>
+</div>
+<div class="cell-output cell-output-stdout">
+<pre><code>Saved stippled image to &#39;stippleImage.rds&#39; (statsMemeChallenge directory not found)
+You can manually copy this file to the statsMemeChallenge directory</code></pre>
+</div>
+</div>
+</section>
+<section id="displaying-the-results" class="level2">
+<h2>Displaying the Results</h2>
+<p>Let’s visualize the original image, the importance map, and the stippled version side by side for comparison.</p>
+<div class="cell">
+<div class="cell-output-display">
+<div class="quarto-figure quarto-figure-center">
+<figure>
+<p><img src="index_files/figure-html/display-results-r-1.png" class="img-fluid" width="3600" /></p>
+<figcaption>Comparison of original image, importance map, and blue noise stippling</figcaption>
+</figure>
+</div>
+</div>
+</div>
+</section>
+<section id="progressive-stippling-animation" class="level2">
+<h2>Progressive Stippling Animation</h2>
+<p>This section creates a GIF showing how the stippled image looks as more points are added sequentially. We’ll use the already-computed stippling points to generate frames at increments of 100 points.</p>
+<div class="cell">
+<div class="cell-output cell-output-stdout">
+<pre><code>Using existing stippling with 42688 points</code></pre>
+</div>
+<div class="cell-output cell-output-stdout">
+<pre><code>Image shape: 800 x 667 </code></pre>
+</div>
+<div class="cell-output cell-output-stdout">
+<pre><code>Generated 428 frames</code></pre>
+</div>
+<div class="cell-output cell-output-stdout">
+<pre><code>Point counts: 1, 100, 200, 300, 400, 500, 600, 700, 800, 900, 1000, 1100, 1200, 1300, 1400, 1500, 1600, 1700, 1800, 1900, 2000, 2100, 2200, 2300, 2400, 2500, 2600, 2700, 2800, 2900, 3000, 3100, 3200, 3300, 3400, 3500, 3600, 3700, 3800, 3900, 4000, 4100, 4200, 4300, 4400, 4500, 4600, 4700, 4800, 4900, 5000, 5100, 5200, 5300, 5400, 5500, 5600, 5700, 5800, 5900, 6000, 6100, 6200, 6300, 6400, 6500, 6600, 6700, 6800, 6900, 7000, 7100, 7200, 7300, 7400, 7500, 7600, 7700, 7800, 7900, 8000, 8100, 8200, 8300, 8400, 8500, 8600, 8700, 8800, 8900, 9000, 9100, 9200, 9300, 9400, 9500, 9600, 9700, 9800, 9900, 10000, 10100, 10200, 10300, 10400, 10500, 10600, 10700, 10800, 10900, 11000, 11100, 11200, 11300, 11400, 11500, 11600, 11700, 11800, 11900, 12000, 12100, 12200, 12300, 12400, 12500, 12600, 12700, 12800, 12900, 13000, 13100, 13200, 13300, 13400, 13500, 13600, 13700, 13800, 13900, 14000, 14100, 14200, 14300, 14400, 14500, 14600, 14700, 14800, 14900, 15000, 15100, 15200, 15300, 15400, 15500, 15600, 15700, 15800, 15900, 16000, 16100, 16200, 16300, 16400, 16500, 16600, 16700, 16800, 16900, 17000, 17100, 17200, 17300, 17400, 17500, 17600, 17700, 17800, 17900, 18000, 18100, 18200, 18300, 18400, 18500, 18600, 18700, 18800, 18900, 19000, 19100, 19200, 19300, 19400, 19500, 19600, 19700, 19800, 19900, 20000, 20100, 20200, 20300, 20400, 20500, 20600, 20700, 20800, 20900, 21000, 21100, 21200, 21300, 21400, 21500, 21600, 21700, 21800, 21900, 22000, 22100, 22200, 22300, 22400, 22500, 22600, 22700, 22800, 22900, 23000, 23100, 23200, 23300, 23400, 23500, 23600, 23700, 23800, 23900, 24000, 24100, 24200, 24300, 24400, 24500, 24600, 24700, 24800, 24900, 25000, 25100, 25200, 25300, 25400, 25500, 25600, 25700, 25800, 25900, 26000, 26100, 26200, 26300, 26400, 26500, 26600, 26700, 26800, 26900, 27000, 27100, 27200, 27300, 27400, 27500, 27600, 27700, 27800, 27900, 28000, 28100, 28200, 28300, 28400, 28500, 28600, 28700, 28800, 28900, 29000, 29100, 29200, 29300, 29400, 29500, 29600, 29700, 29800, 29900, 30000, 30100, 30200, 30300, 30400, 30500, 30600, 30700, 30800, 30900, 31000, 31100, 31200, 31300, 31400, 31500, 31600, 31700, 31800, 31900, 32000, 32100, 32200, 32300, 32400, 32500, 32600, 32700, 32800, 32900, 33000, 33100, 33200, 33300, 33400, 33500, 33600, 33700, 33800, 33900, 34000, 34100, 34200, 34300, 34400, 34500, 34600, 34700, 34800, 34900, 35000, 35100, 35200, 35300, 35400, 35500, 35600, 35700, 35800, 35900, 36000, 36100, 36200, 36300, 36400, 36500, 36600, 36700, 36800, 36900, 37000, 37100, 37200, 37300, 37400, 37500, 37600, 37700, 37800, 37900, 38000, 38100, 38200, 38300, 38400, 38500, 38600, 38700, 38800, 38900, 39000, 39100, 39200, 39300, 39400, 39500, 39600, 39700, 39800, 39900, 40000, 40100, 40200, 40300, 40400, 40500, 40600, 40700, 40800, 40900, 41000, 41100, 41200, 41300, 41400, 41500, 41600, 41700, 41800, 41900, 42000, 42100, 42200, 42300, 42400, 42500, 42600, 42688 </code></pre>
+</div>
+</div>
+<p>Now let’s create the GIF animation:</p>
+<div class="quarto-figure quarto-figure-center">
+<figure>
+<p><img src="progressive_stippling.gif" class="img-fluid" /></p>
+<figcaption>Progressive stippling animation showing the sequential build-up of points. Each frame represents an increment of 100 points, demonstrating how the blue noise stippling pattern develops as more points are added.</figcaption>
+</figure>
+</div>
 </section>
 
 </main>
 <!-- /main column -->
-<script id="quarto-html-after-body" type="application/javascript">
+<script id = "quarto-html-after-body" type="application/javascript">
   window.document.addEventListener("DOMContentLoaded", function (event) {
     const icon = "";
     const anchorJS = new window.AnchorJS();
@@ -511,7 +583,6 @@ ul.task-list li input[type="checkbox"] {
   </script>
 </div> <!-- /content -->
 
+</body>
 
-
-
-</body></html>
+</html>
